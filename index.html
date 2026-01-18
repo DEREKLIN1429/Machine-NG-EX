@@ -331,7 +331,6 @@
     // ⬇️ 日期時間核心修復區域 (解決 Invalid Format 與 格式不一致問題)
     // ====================================================================
 
-    // 1. 產生標準格式字串 (給按鈕用) -> 強制輸出 DD/MM/YYYY HH:mm (IST時間)
     function getFullDateTimeString(dateObj) {
         // 先轉成 UTC
         const utc = dateObj.getTime() + (dateObj.getTimezoneOffset() * 60000);
@@ -348,28 +347,23 @@
         return `${day}/${month}/${year} ${hour}:${minute}`;
     }
 
-    // 2. 智慧解析函數：同時支援 DD/MM/YYYY 和 YYYY/MM/DD
+    // 智慧解析函數：同時支援 DD/MM/YYYY 和 YYYY/MM/DD
     function parseCustomDateTime(dtStr) {
         if (!dtStr) return null;
         let s = dtStr.trim();
         s = s.replace(/-/g, '/').replace('T', ' '); // 將 - 轉為 /，T 轉為空格 (相容 ISO)
 
         // 嘗試匹配格式 A: DD/MM/YYYY HH:mm (標準前端格式)
-        // 邏輯: 日/月/年 (年是4位數在最後)
         let dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?$/);
         
         // 嘗試匹配格式 B: YYYY/MM/DD HH:mm (標準後端格式)
-        // 邏輯: 年/月/日 (年是4位數在最前)
         let ymd = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::\d{2})?$/);
 
         if (dmy) {
-            // DD/MM/YYYY -> new Date(year, month-1, day, ...)
             return new Date(parseInt(dmy[3]), parseInt(dmy[2])-1, parseInt(dmy[1]), parseInt(dmy[4]), parseInt(dmy[5]));
         } else if (ymd) {
-            // YYYY/MM/DD -> new Date(year, month-1, day, ...)
             return new Date(parseInt(ymd[1]), parseInt(ymd[2])-1, parseInt(ymd[3]), parseInt(ymd[4]), parseInt(ymd[5]));
         } else {
-            // 嘗試系統原生解析
             let d = new Date(s);
             return isNaN(d) ? null : d;
         }
@@ -398,31 +392,63 @@
     
     function updateSingleTime(id){const n=new Date();document.getElementById(id).value=getFullDateTimeString(n);calculateTotalStopTime()}
     
+    // ====================================================================
+    // 🔴 主要修改區域：Recent Records 排序邏輯修正 (純前端)
+    // ====================================================================
     function loadRecentRecords(){
-        const listContainer=document.getElementById('recent-records-list');listContainer.innerHTML='<p style="text-align: center; color: #999;">Loading...</p>';
+        const listContainer=document.getElementById('recent-records-list');
+        listContainer.innerHTML='<p style="text-align: center; color: #999;">Loading...</p>';
         const limit = parseInt(localStorage.getItem("cfg_recent_limit")) || DEFAULT_RECENT_LIMIT;
 
         fetch(`${GAS_URL}?action=loadRecords`).then(r=>r.json()).then(res=>{
             listContainer.innerHTML='';
-            if(res.result==='success'&&res.data.length>0){
-                // 🔴 修改目標：加入日期降冪排序邏輯 
-                // 使用 parseCustomDateTime 將字串轉為日期物件，再進行比對 (TimeB - TimeA = Descending)
-                res.data.sort((a, b) => {
+            if(res.result==='success' && res.data && res.data.length > 0){
+                
+                // 1. 取得所有資料 (假設是從 Sheet 抓回來的所有列)
+                let allRecords = res.data;
+
+                // 2. 在前端進行日期「降冪排序」 (Time B - Time A)
+                // 這樣可以確保最新的日期 (Timestamp 較大) 排在最前面
+                // 無視 Google Sheet 原本的排序
+                allRecords.sort((a, b) => {
                     const tA = parseCustomDateTime(a.stopTimeFull || a.stopTime);
                     const tB = parseCustomDateTime(b.stopTimeFull || b.stopTime);
-                    // 若解析失敗則視為 0，避免排序錯誤
-                    return (tB ? tB.getTime() : 0) - (tA ? tA.getTime() : 0);
+                    // 若解析失敗則視為 0 (排到最後面)
+                    const timeA = tA ? tA.getTime() : 0;
+                    const timeB = tB ? tB.getTime() : 0;
+                    return timeB - timeA; // 降冪 (大到小)
                 });
 
-                const recordsToShow = res.data.slice(0, limit);
+                // 3. 切割出前 N 筆 (依據設定)
+                const recordsToShow = allRecords.slice(0, limit);
+                
+                // 4. 渲染畫面
                 recordsToShow.forEach(r=>{
-                    const i=document.createElement('div');i.className='record-item';i.setAttribute('onclick',`populateForm('${r.formNo}')`);
-                    i.innerHTML=`<div class="main-info-group"><span class="form-no-display">#${r.formNo||'N/A'}</span><span class="stop-time-display">🛑 ${r.stopTime||"No Stop Time"}</span></div><div class="details"><div>${r.machine||'N/A'} (${r.concernSection||'N/A'})</div><div>${r.startTime?'Start: '+r.startTime:''}</div></div>`;
+                    const i=document.createElement('div');
+                    i.className='record-item';
+                    i.setAttribute('onclick',`populateForm('${r.formNo}')`);
+                    
+                    // 顯示內容
+                    i.innerHTML=`
+                        <div class="main-info-group">
+                            <span class="form-no-display">#${r.formNo||'N/A'}</span>
+                            <span class="stop-time-display">🛑 ${r.stopTimeFull || r.stopTime || "No Stop Time"}</span>
+                        </div>
+                        <div class="details">
+                            <div>${r.machine||'N/A'} (${r.concernSection||'N/A'})</div>
+                            <div>${r.startTimeFull ? 'Start: '+r.startTimeFull : (r.startTime ? 'Start: '+r.startTime : '')}</div>
+                        </div>`;
                     listContainer.appendChild(i)
                 })
-            }else{listContainer.innerHTML='<p style="text-align: center; color: #999;">無最近紀錄。</p>'}
-        }).catch(e=>{listContainer.innerHTML='<p style="text-align: center; color: red;">❌ 載入失敗。</p>'})
+            }else{
+                listContainer.innerHTML='<p style="text-align: center; color: #999;">無最近紀錄。</p>'
+            }
+        }).catch(e=>{
+            console.error(e);
+            listContainer.innerHTML='<p style="text-align: center; color: red;">❌ 載入失敗。</p>'
+        })
     }
+    // ====================================================================
 
     function populateForm(f){
         if(!confirm(`回填單號 [${f}]?`))return;showStatus('loading','Loading...',f);
@@ -437,7 +463,7 @@
                 document.getElementById('input-machine').value=d.machine;
                 document.getElementById('input-form-no').value=d.formNo;
 
-                // 🔴 修正：強制轉換並統一回填的時間格式
+                // 強制轉換並統一回填的時間格式
                 const stopObj = parseCustomDateTime(d.stopTimeFull);
                 document.getElementById('input-stop-time-full').value = stopObj ? getFullDateTimeString(stopObj) : (d.stopTimeFull || "");
 
