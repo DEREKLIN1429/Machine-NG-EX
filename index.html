@@ -405,6 +405,15 @@
         fetch(`${GAS_URL}?action=loadRecords`).then(r=>r.json()).then(res=>{
             listContainer.innerHTML='';
             if(res.result==='success'&&res.data.length>0){
+                // 🔴 修改目標：加入日期降冪排序邏輯 
+                // 使用 parseCustomDateTime 將字串轉為日期物件，再進行比對 (TimeB - TimeA = Descending)
+                res.data.sort((a, b) => {
+                    const tA = parseCustomDateTime(a.stopTimeFull || a.stopTime);
+                    const tB = parseCustomDateTime(b.stopTimeFull || b.stopTime);
+                    // 若解析失敗則視為 0，避免排序錯誤
+                    return (tB ? tB.getTime() : 0) - (tA ? tA.getTime() : 0);
+                });
+
                 const recordsToShow = res.data.slice(0, limit);
                 recordsToShow.forEach(r=>{
                     const i=document.createElement('div');i.className='record-item';i.setAttribute('onclick',`populateForm('${r.formNo}')`);
