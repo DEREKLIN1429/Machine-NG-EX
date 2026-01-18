@@ -393,7 +393,7 @@
     function updateSingleTime(id){const n=new Date();document.getElementById(id).value=getFullDateTimeString(n);calculateTotalStopTime()}
     
     // ====================================================================
-    // 🔴 主要修改區域：Recent Records 排序邏輯修正 (純前端)
+    // 🔴 主要修改區域：Recent Records 強制抓取最新資料 (從 Row 2 開始)
     // ====================================================================
     function loadRecentRecords(){
         const listContainer=document.getElementById('recent-records-list');
@@ -404,31 +404,40 @@
             listContainer.innerHTML='';
             if(res.result==='success' && res.data && res.data.length > 0){
                 
-                // 1. 取得所有資料 (假設是從 Sheet 抓回來的所有列)
+                // 1. 取得所有資料
                 let allRecords = res.data;
 
-                // 2. 在前端進行日期「降冪排序」 (Time B - Time A)
-                // 這樣可以確保最新的日期 (Timestamp 較大) 排在最前面
-                // 無視 Google Sheet 原本的排序
+                // 2.【關鍵修正】前端過濾：確保我們只處理有效的資料行
+                // 假設 Row 1 是標題，如果不小心被抓下來，這裡會檢查 formNo 是否為空或等於標題文字
+                // 這樣就等於變相執行了「從第 2 列開始抓取有效資料」的邏輯
+                allRecords = allRecords.filter(r => r.formNo && r.formNo !== "Repair Form No" && r.machine !== "Machine");
+
+                // 3.【關鍵修正】日期降冪排序 (Time B - Time A)
+                // 這確保了「最新」的資料永遠排在陣列的最前面 [0]
+                // 無論 Google Sheet 原始順序是舊到新還是亂序，這裡都會強制修正為最新到最舊
                 allRecords.sort((a, b) => {
                     const tA = parseCustomDateTime(a.stopTimeFull || a.stopTime);
                     const tB = parseCustomDateTime(b.stopTimeFull || b.stopTime);
                     // 若解析失敗則視為 0 (排到最後面)
                     const timeA = tA ? tA.getTime() : 0;
                     const timeB = tB ? tB.getTime() : 0;
-                    return timeB - timeA; // 降冪 (大到小)
+                    return timeB - timeA; // 降冪 (大數字=新時間 在前)
                 });
 
-                // 3. 切割出前 N 筆 (依據設定)
+                // 4. 切割出前 N 筆 (顯示最新的 N 筆)
                 const recordsToShow = allRecords.slice(0, limit);
                 
-                // 4. 渲染畫面
+                // 5. 渲染畫面
+                if (recordsToShow.length === 0) {
+                     listContainer.innerHTML='<p style="text-align: center; color: #999;">無有效紀錄。</p>';
+                     return;
+                }
+
                 recordsToShow.forEach(r=>{
                     const i=document.createElement('div');
                     i.className='record-item';
                     i.setAttribute('onclick',`populateForm('${r.formNo}')`);
                     
-                    // 顯示內容
                     i.innerHTML=`
                         <div class="main-info-group">
                             <span class="form-no-display">#${r.formNo||'N/A'}</span>
